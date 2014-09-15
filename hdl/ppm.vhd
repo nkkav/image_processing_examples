@@ -1,7 +1,7 @@
 -- Copyright 2010 Martin Thompson (martin@parallelpoints.com). All
 -- rights reserved.
 --
--- This version (modified pgm.vhd) by Nikolaos Kavvadias
+-- This version (ppm.vhd; derived from pgm.vhd) by Nikolaos Kavvadias
 -- (nikos@nkavvadias.com).
 -- 
 -- Redistribution and use in source, binary and physical forms, with
@@ -25,15 +25,17 @@
 -- CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 -- WITH THE FILES OR THE USE OR OTHER DEALINGS IN THE FILES
 
-package pgm is
+package ppm is
     subtype coordinate is natural;
     subtype pixel is integer range 0 to 255;
-    type pixel_array is array (coordinate range <>, coordinate range <>) of pixel;
+    subtype colorcomp is integer range 0 to 2;
+    type pixel_array is array (coordinate range <>, coordinate range <>, colorcomp range <>) of pixel;
     type pixel_array_ptr is access pixel_array;
-    impure function pgm_read (
+    type RGB is (R, G, B);
+    impure function ppm_read (
         filename : string)
         return pixel_array_ptr;
-    procedure pgm_write (
+    procedure ppm_write (
         filename : in string;
         i        : in pixel_array);
 
@@ -42,16 +44,16 @@ package pgm is
     -- Useful for initialising arrays such that the first coordinate is the x-coord, but the initialisation can "look" like the
     -- image in question within the code
     function transpose (i          : pixel_array) return pixel_array;
-end package pgm;
+end package ppm;
 
 use std.textio.all;
 use work.libv.all;
-package body pgm is
+package body ppm is
 
-    impure function pgm_read (
+    impure function ppm_read (
         filename : string)
         return pixel_array_ptr is
-        file pgmfile           : text;
+        file ppmfile           : text;
         variable width, height : coordinate;                     -- storage for image dimensions
         variable l             : line;                           -- buffer for a line of text
         variable s             : string(1 to 2);                 -- to check the P2 header
@@ -62,27 +64,27 @@ package body pgm is
         variable count         : positive;                       -- keep track of how many numbers we've read
         variable empty_image   : pixel_array_ptr := null;        -- return this on error
         variable ret           : pixel_array_ptr;                -- actual return value
-        variable x, y          : coordinate;                     -- coordinate tracking
-    begin  -- function pgm_read
+        variable x, y, a       : coordinate;                     -- coordinate tracking (a for colour component)
+    begin  -- function ppm_read
         -- setup some defaults
         width  := 0;
         height := 0;
-        file_open(pgmfile, filename, read_mode);
-        readline(pgmfile, l);
+        file_open(ppmfile, filename, read_mode);
+        readline(ppmfile, l);
         read(l, s(1));
         read(l, s(2), good);
-        if not good or s /= "P2" then
-            report "PGM file '"&filename&"' not P2 type" severity warning;
-            file_close(pgmfile);
+        if not good or s /= "P3" then
+            report "ppm file '"&filename&"' not P3 type" severity warning;
+            file_close(ppmfile);
             return empty_image;
         end if;
         allints : loop  -- read until we have 3 integers (width, height and colour depth).  
             line_reading : loop
-                readline(pgmfile, l);
+                readline(ppmfile, l);
                 exit when l.all(1) = '#';                        -- skip comments;
                 if l'length = 0 then
-                    report "EOF reached in pgmfile before opening integers found" severity warning;
-                    file_close(pgmfile);
+                    report "EOF reached in ppmfile before opening integers found" severity warning;
+                    file_close(ppmfile);
                     return empty_image;
                 end if;
                 number_reading : loop
@@ -100,15 +102,21 @@ package body pgm is
         -- now read the image pixels
         x      := 0;
         y      := 0;
-        ret    := new pixel_array(0 to width-1, 0 to height-1);
+        ret    := new pixel_array(0 to width-1, 0 to height-1, 0 to 2);
         allpixels : loop
-            readline(pgmfile, l);
+            readline(ppmfile, l);
             exit when l = null;
             exit when l'length = 0;
             loop
                 read(l, int, good);
                 exit           when not good;
-                ret(x, y) := int;
+                ret(x, y, 0) := int;
+                read(l, int, good);
+                exit           when not good;
+                ret(x, y, 1) := int;
+                read(l, int, good);
+                exit           when not good;
+                ret(x, y, 2) := int;
                 exit allpixels when x = width-1 and y = height-1;
                 x         := x + 1;
                 if x >= width then
@@ -121,29 +129,31 @@ package body pgm is
             report "Don't seem to have read all the pixels I should have"
             severity warning;
         return ret;
-    end function pgm_read;
-    procedure pgm_write (
+    end function ppm_read;
+    procedure ppm_write (
         filename : in string;
         i        : in pixel_array) is
-        file pgmfile : text;
+        file ppmfile : text;
         variable l   : line;
-    begin  -- procedure pgm_write
-        file_open(pgmfile, filename, write_mode);
-        write(l, string'("P2"));
-        writeline(pgmfile, l);
+    begin  -- procedure ppm_write
+        file_open(ppmfile, filename, write_mode);
+        write(l, string'("P3"));
+        writeline(ppmfile, l);
         write(l, str(i'length(1)) & " " & str(i'length(2)));
-        writeline(pgmfile, l);
+        writeline(ppmfile, l);
         write(l, str(pixel'high));
-        writeline(pgmfile, l);
+        writeline(ppmfile, l);
         for y in i'range(2) loop
             for x in i'range(1) loop
-                write(l, str(i(x, y)) & " ");
+                for a in i'range(3) loop
+                    write(l, str(i(x, y, a)) & " ");
+                end loop;
+                writeline(ppmfile, l);
             end loop;  -- x
-            writeline(pgmfile, l);
         end loop;  -- y
-        file_close(pgmfile);
+        file_close(ppmfile);
         deallocate(l);
-    end procedure pgm_write;
+    end procedure ppm_write;
 
     procedure assert_equal (
         prefix        : string;
@@ -152,24 +162,29 @@ package body pgm is
     begin  -- procedure assert_equal
         assert_equal(prefix & "(width)", expected'length(1), got'length(1), level);
         assert_equal(prefix & "(height)", expected'length(2), got'length(2), level);
+        assert_equal(prefix & "(RGB)", expected'length(3), got'length(3), level);
         for y in expected'range(2) loop
             for x in expected'range(1) loop
-                assert expected(x, y) = got(x, y)
-                    report prefix & " (" & str(x) & "," & str(y) & ")" &
-                    str(expected(x, y)) & " /= " & str(got(x, y))
-                    severity level;
+                for a in expected'range(3) loop
+                    assert expected(x, y, a) = got(x, y, a)
+                        report prefix & " (" & str(x) & "," & str(y) & "," & str(a) & ")" &
+                        str(expected(x, y, a)) & " /= " & str(got(x, y, a))
+                        severity level;
+                end loop;  -- a
             end loop;  -- x
         end loop;  -- y
     end procedure assert_equal;
 
     function transpose (i : pixel_array) return pixel_array is
-        variable ret : pixel_array(i'range(2), i'range(1));
+        variable ret : pixel_array(i'range(2), i'range(1), i'range(3));
     begin  -- function transpose
         for i1 in i'range(1) loop
             for i2 in i'range(2) loop
-                ret(i2, i1) := i(i1, i2);
+                for i3 in i'range(3) loop
+                    ret(i2, i1, i3) := i(i1, i2, i3);
+                end loop;  -- i3
             end loop;  -- i2
         end loop;  -- i1
         return ret;
     end function transpose;
-end package body pgm;
+end package body ppm;

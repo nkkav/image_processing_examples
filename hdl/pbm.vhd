@@ -1,9 +1,9 @@
 -- Copyright 2010 Martin Thompson (martin@parallelpoints.com). All
 -- rights reserved.
---
--- This version (modified pgm.vhd) by Nikolaos Kavvadias
--- (nikos@nkavvadias.com).
 -- 
+-- This version (pbm.vhd; derived from pgm.vhd) by Nikolaos Kavvadias
+-- (nikos@nkavvadias.com).
+--
 -- Redistribution and use in source, binary and physical forms, with
 -- or without modification, are permitted provided that the following
 -- conditions are met:
@@ -24,16 +24,19 @@
 -- CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
 -- CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 -- WITH THE FILES OR THE USE OR OTHER DEALINGS IN THE FILES
+--
+-- This version (pbm.vhd) by Nikolaos Kavvadias (nikos@nkavvadias.com).
+--
 
-package pgm is
+package pbm is
     subtype coordinate is natural;
-    subtype pixel is integer range 0 to 255;
+    subtype pixel is integer range 0 to 1;
     type pixel_array is array (coordinate range <>, coordinate range <>) of pixel;
     type pixel_array_ptr is access pixel_array;
-    impure function pgm_read (
+    impure function pbm_read (
         filename : string)
         return pixel_array_ptr;
-    procedure pgm_write (
+    procedure pbm_write (
         filename : in string;
         i        : in pixel_array);
 
@@ -42,20 +45,20 @@ package pgm is
     -- Useful for initialising arrays such that the first coordinate is the x-coord, but the initialisation can "look" like the
     -- image in question within the code
     function transpose (i          : pixel_array) return pixel_array;
-end package pgm;
+end package pbm;
 
 use std.textio.all;
 use work.libv.all;
-package body pgm is
+package body pbm is
 
-    impure function pgm_read (
+    impure function pbm_read (
         filename : string)
         return pixel_array_ptr is
-        file pgmfile           : text;
+        file pbmfile           : text;
         variable width, height : coordinate;                     -- storage for image dimensions
         variable l             : line;                           -- buffer for a line of text
-        variable s             : string(1 to 2);                 -- to check the P2 header
-        variable ints          : integer_vector(1 to 3);         -- store the first three integers (width, height and depth)
+        variable s             : string(1 to 2);                 -- to check the P1 header
+        variable ints          : integer_vector(1 to 2);         -- store the first two integers (width and height)
         variable int           : integer;                        -- temporary storage
         variable ch            : character;                      -- temporary storage
         variable good          : boolean;                        -- to record whether a read is successful or not
@@ -63,26 +66,26 @@ package body pgm is
         variable empty_image   : pixel_array_ptr := null;        -- return this on error
         variable ret           : pixel_array_ptr;                -- actual return value
         variable x, y          : coordinate;                     -- coordinate tracking
-    begin  -- function pgm_read
+    begin  -- function pbm_read
         -- setup some defaults
         width  := 0;
         height := 0;
-        file_open(pgmfile, filename, read_mode);
-        readline(pgmfile, l);
+        file_open(pbmfile, filename, read_mode);
+        readline(pbmfile, l);
         read(l, s(1));
         read(l, s(2), good);
-        if not good or s /= "P2" then
-            report "PGM file '"&filename&"' not P2 type" severity warning;
-            file_close(pgmfile);
+        if not good or s /= "P1" then
+            report "pbm file '"&filename&"' not P1 type" severity warning;
+            file_close(pbmfile);
             return empty_image;
         end if;
         allints : loop  -- read until we have 3 integers (width, height and colour depth).  
             line_reading : loop
-                readline(pgmfile, l);
+                readline(pbmfile, l);
                 exit when l.all(1) = '#';                        -- skip comments;
                 if l'length = 0 then
-                    report "EOF reached in pgmfile before opening integers found" severity warning;
-                    file_close(pgmfile);
+                    report "EOF reached in pbmfile before opening integers found" severity warning;
+                    file_close(pbmfile);
                     return empty_image;
                 end if;
                 number_reading : loop
@@ -102,7 +105,7 @@ package body pgm is
         y      := 0;
         ret    := new pixel_array(0 to width-1, 0 to height-1);
         allpixels : loop
-            readline(pgmfile, l);
+            readline(pbmfile, l);
             exit when l = null;
             exit when l'length = 0;
             loop
@@ -121,29 +124,29 @@ package body pgm is
             report "Don't seem to have read all the pixels I should have"
             severity warning;
         return ret;
-    end function pgm_read;
-    procedure pgm_write (
+    end function pbm_read;
+    procedure pbm_write (
         filename : in string;
         i        : in pixel_array) is
-        file pgmfile : text;
+        file pbmfile : text;
         variable l   : line;
-    begin  -- procedure pgm_write
-        file_open(pgmfile, filename, write_mode);
-        write(l, string'("P2"));
-        writeline(pgmfile, l);
+    begin  -- procedure pbm_write
+        file_open(pbmfile, filename, write_mode);
+        write(l, string'("P1"));
+        writeline(pbmfile, l);
         write(l, str(i'length(1)) & " " & str(i'length(2)));
-        writeline(pgmfile, l);
+        writeline(pbmfile, l);
         write(l, str(pixel'high));
-        writeline(pgmfile, l);
+        writeline(pbmfile, l);
         for y in i'range(2) loop
             for x in i'range(1) loop
                 write(l, str(i(x, y)) & " ");
             end loop;  -- x
-            writeline(pgmfile, l);
+            writeline(pbmfile, l);
         end loop;  -- y
-        file_close(pgmfile);
+        file_close(pbmfile);
         deallocate(l);
-    end procedure pgm_write;
+    end procedure pbm_write;
 
     procedure assert_equal (
         prefix        : string;
@@ -172,4 +175,4 @@ package body pgm is
         end loop;  -- i1
         return ret;
     end function transpose;
-end package body pgm;
+end package body pbm;
